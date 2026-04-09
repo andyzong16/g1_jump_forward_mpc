@@ -11,13 +11,13 @@ import jax
 import numpy as np
 import mpx.config.config_srbd as config
 import mpx.utils.mpc_wrapper_srbd as mpc_wrapper_srbd
+import mpx.utils.sim as sim_utils
 
 gpu_device = jax.devices('gpu')[0]
 jax.default_device(gpu_device)
 
 from gym_quadruped.quadruped_env import QuadrupedEnv
 import numpy as np
-from gym_quadruped.utils.mujoco.visual import render_sphere , render_vector
 
 
 robot_name = "aliengo"   # "aliengo", "mini_cheetah", "go2", "hyqreal", ...
@@ -47,7 +47,7 @@ mpc = mpc_wrapper_srbd.BatchedMPCControllerWrapper(config, n_env=1)
 counter = 0
 ids = []
 for i in range(config.N*5):
-     ids.append(render_sphere(viewer=env.viewer,
+     ids.append(sim_utils.render_sphere(viewer=env.viewer,
               position = np.array([0,0,0]),
               diameter = 0.01,
               color=[1,0,0,1]))
