@@ -191,6 +191,7 @@ def h1_wb_dynamics(model, mjx_model, contact_id, body_id, n_joints, dt, x, u, t,
 
 
 def h1_kinodynamic_dynamics(model, mjx_model, contact_id, body_id, n_joints, dt, x, u, t, parameter):
+    
     qpos = x[: n_joints + 7]
     qvel = x[n_joints + 7 : 2 * n_joints + 13]
     dq = x[13 + n_joints : 13 + 2 * n_joints]
@@ -205,7 +206,7 @@ def h1_kinodynamic_dynamics(model, mjx_model, contact_id, body_id, n_joints, dt,
 
     mass_matrix = mjx.full_m(mjx_model, mjx_data)
     bias = mjx_data.qfrc_bias
-    _, jacobian = _h1_contact_kinematics(mjx_model, mjx_data, contact_id, body_id)
+    feet_next, jacobian = _h1_contact_kinematics(mjx_model, mjx_data, contact_id, body_id)
 
     qdd_joints = (dq_next - dq) / dt
     rhs = (jacobian @ grf)[:6] - bias[:6] - mass_matrix[:6, 6:] @ qdd_joints
@@ -217,12 +218,6 @@ def h1_kinodynamic_dynamics(model, mjx_model, contact_id, body_id, n_joints, dt,
     p_next = x[:3] + qvel_next[:3] * dt
     quat_next = math.quat_integrate(x[3:7], qvel_next[3:6], dt)
     q_next = x[7 : 7 + n_joints] + dq_next * dt
-
-    next_qpos = jnp.concatenate([p_next, quat_next, q_next])
-    next_data = mjx.make_data(model)
-    next_data = next_data.replace(qpos=next_qpos, qvel=qvel_next)
-    next_data = mjx.fwd_position(mjx_model, next_data)
-    feet_next, _ = _h1_contact_kinematics(mjx_model, next_data, contact_id, body_id)
 
     return jnp.concatenate([p_next, quat_next, q_next, qvel_next, feet_next])
 
