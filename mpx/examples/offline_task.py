@@ -50,6 +50,13 @@ TASKS = {
         "config": "mpx.config.config_acrobot_swingup",
         "benchmark_mode": "direct",
     },
+    "g1_jump_forward": {
+        "config": "mpx.config.config_g1_jump_forward",
+        "scene_path": os.path.abspath(
+            os.path.join(dir_path, "..", "data", "unitree_g1", "g1.xml")
+        ),
+        "benchmark_mode": "wrapper",
+    }
 }
 
 SOLVERS = ("primal_dual", "fddp")
