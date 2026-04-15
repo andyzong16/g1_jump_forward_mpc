@@ -24,6 +24,20 @@ def _h1_contact_kinematics(mjx_model, mjx_data, contact_id, body_id):
     return feet, jacobian
 
 
+def _g1_kinodynamic_contact_kinematics(mjx_model, mjx_data, contact_id, body_id):
+    """G1: one Jacobian body per contact geom (e.g. two feet)."""
+    feet_parts = []
+    jac_cols = []
+    for i in range(len(contact_id)):
+        p = mjx_data.geom_xpos[contact_id[i]]
+        j, _ = mjx.jac(mjx_model, mjx_data, p, body_id[i])
+        feet_parts.append(p)
+        jac_cols.append(j)
+    feet = jnp.concatenate(feet_parts, axis=0)
+    jacobian = jnp.concatenate(jac_cols, axis=1)
+    return feet, jacobian
+
+
 def quadruped_srbd_dynamics(mass, inertia,inertia_inv, dt, x, u, t,parameter):
     # Extract state variables
     p = x[:3]
@@ -191,7 +205,7 @@ def h1_wb_dynamics(model, mjx_model, contact_id, body_id, n_joints, dt, x, u, t,
 
 
 def h1_kinodynamic_dynamics(model, mjx_model, contact_id, body_id, n_joints, dt, x, u, t, parameter):
-    
+
     qpos = x[: n_joints + 7]
     qvel = x[n_joints + 7 : 2 * n_joints + 13]
     dq = x[13 + n_joints : 13 + 2 * n_joints]
@@ -251,6 +265,81 @@ def h1_kinodynamic_torques(
     mjx_data = mjx.fwd_position(mjx_model, mjx_data)
     mjx_data = mjx.fwd_velocity(mjx_model, mjx_data)
     _, jacobian = _h1_contact_kinematics(mjx_model, mjx_data, contact_id, body_id)
+    mjx_data = mjx.inverse(mjx_model, mjx_data)
+
+    tau_ff = (mjx_data.qfrc_inverse - jacobian @ grf)[6:]
+    q_des = X[1, 7 : 7 + n_joints]
+    dq_des = qvel_next[6:]
+    tau_fb = joint_kp * (q_des - qpos[7:]) + joint_kd * (dq_des - qvel[6:])
+    return tau_ff + tau_fb
+
+
+def g1_kinodynamic_dynamics(model, mjx_model, contact_id, body_id, n_joints, n_contact, dt, x, u, t, parameter):
+
+    qpos = x[: n_joints + 7]
+    qvel = x[n_joints + 7 : 2 * n_joints + 13]
+    dq = x[13 + n_joints : 13 + 2 * n_joints]
+    dq_next = u[:n_joints]
+    contact = parameter[t, :n_contact]
+    grf = _mask_contact_forces(u[n_joints:], contact)
+
+    mjx_data = mjx.make_data(model)
+    mjx_data = mjx_data.replace(qpos=qpos, qvel=qvel)
+    mjx_data = mjx.fwd_position(mjx_model, mjx_data)
+    mjx_data = mjx.fwd_velocity(mjx_model, mjx_data)
+
+    mass_matrix = mjx.full_m(mjx_model, mjx_data)
+    bias = mjx_data.qfrc_bias
+    feet_next, jacobian = _g1_kinodynamic_contact_kinematics(
+        mjx_model, mjx_data, contact_id, body_id
+    )
+
+    qdd_joints = (dq_next - dq) / dt
+    rhs = (jacobian @ grf)[:6] - bias[:6] - mass_matrix[:6, 6:] @ qdd_joints
+    qdd_base = jnp.linalg.solve(mass_matrix[:6, :6] + 1e-6 * jnp.eye(6), rhs)
+
+    base_velocity_next = qvel[:6] + qdd_base * dt
+    qvel_next = jnp.concatenate([base_velocity_next, dq_next])
+
+    p_next = x[:3] + qvel_next[:3] * dt
+    quat_next = math.quat_integrate(x[3:7], qvel_next[3:6], dt)
+    q_next = x[7 : 7 + n_joints] + dq_next * dt
+
+    return jnp.concatenate([p_next, quat_next, q_next, qvel_next, feet_next])
+
+
+def g1_kinodynamic_torques(
+    model,
+    mjx_model,
+    contact_id,
+    body_id,
+    n_joints,
+    n_contact,
+    dt,
+    joint_kp,
+    joint_kd,
+    x0,
+    X,
+    U,
+    reference,
+    parameter,
+):
+    del reference
+    qpos = x0[: n_joints + 7]
+    qvel = x0[n_joints + 7 : 2 * n_joints + 13]
+    qvel_next = X[1, n_joints + 7 : 2 * n_joints + 13]
+    qacc = (qvel_next - qvel) / dt
+
+    contact = parameter[0, :n_contact]
+    grf = _mask_contact_forces(U[0, n_joints:], contact)
+
+    mjx_data = mjx.make_data(model)
+    mjx_data = mjx_data.replace(qpos=qpos, qvel=qvel, qacc=qacc)
+    mjx_data = mjx.fwd_position(mjx_model, mjx_data)
+    mjx_data = mjx.fwd_velocity(mjx_model, mjx_data)
+    _, jacobian = _g1_kinodynamic_contact_kinematics(
+        mjx_model, mjx_data, contact_id, body_id
+    )
     mjx_data = mjx.inverse(mjx_model, mjx_data)
 
     tau_ff = (mjx_data.qfrc_inverse - jacobian @ grf)[6:]

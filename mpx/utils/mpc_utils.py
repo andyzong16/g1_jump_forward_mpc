@@ -413,6 +413,10 @@ def reference_humanoid_jump_forward(
     jump_distance=0.35,
     foot_shift=0.18,
     foot_lift=0.12,
+    crouch_left=(2, 3, 4),
+    crouch_left_vals=(-0.8, 1.5, -0.8),
+    crouch_right=(7, 8, 9),
+    crouch_right_vals=(-0.8, 1.5, -0.8),
 ):
     n_crouch = max(2, int(0.20 / dt))
     n_flight = max(2, int(0.28 / dt))
@@ -438,8 +442,11 @@ def reference_humanoid_jump_forward(
     quat_ref = jnp.tile(jnp.array([1.0, 0.0, 0.0, 0.0]), (N, 1))
     omega_ref = jnp.zeros((N, 3))
 
-    crouch_q = q0.at[2].set(-0.8).at[3].set(1.5).at[4].set(-0.8)
-    crouch_q = crouch_q.at[7].set(-0.8).at[8].set(1.5).at[9].set(-0.8)
+    crouch_q = q0
+    for idx, val in zip(crouch_left, crouch_left_vals):
+        crouch_q = crouch_q.at[idx].set(val)
+    for idx, val in zip(crouch_right, crouch_right_vals):
+        crouch_q = crouch_q.at[idx].set(val)
     q_crouch = jnp.stack([q0 + (crouch_q - q0) * alpha for alpha in jnp.linspace(0.0, 1.0, n_crouch)], axis=0)
     q_flight = jnp.tile(crouch_q, (n_flight, 1))
     q_land = jnp.stack([crouch_q + (q0 - crouch_q) * alpha for alpha in jnp.linspace(0.0, 1.0, n_land)], axis=0)

@@ -1,6 +1,6 @@
 from functools import partial
 
-import mpx.config.config_h1_kinodynamic as base
+import mpx.config.config_g1_kinodynamic as base
 import mpx.utils.mpc_utils as mpc_utils
 import mpx.utils.objectives as mpc_objectives
 
@@ -48,11 +48,15 @@ MPCWrapper = base.MPCWrapper
 reference = partial(
     mpc_utils.reference_humanoid_jump_forward,
     base_height=robot_height,
-    crouch_height=0.82,
-    apex_height=1.02,
-    jump_distance=1.50,
-    foot_shift=0.18,
-    foot_lift=0.10,
+    crouch_height=0.58,
+    apex_height=0.90,
+    jump_distance=0.55,
+    foot_shift=0.14,
+    foot_lift=0.09,
+    crouch_left=(0, 3, 4),
+    crouch_left_vals=(-1.05, 2.0, -0.55),
+    crouch_right=(6, 9, 10),
+    crouch_right_vals=(-1.05, 2.0, -0.55),
 )
 
 solver_mode = "fddp"
