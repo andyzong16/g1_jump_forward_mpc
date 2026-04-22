@@ -42,7 +42,7 @@ grf_as_state = False
 u_ref = jnp.zeros(m)
 
 Qp = jnp.diag(jnp.array([0.0, 0.0, 1e4]))
-Qrot = jnp.diag(jnp.array([1.0, 1.0, 0.0])) * 1e3
+Qrot = jnp.diag(jnp.array([1.0, 1.0, 0.0])) * 1.0e3
 Qq = jnp.diag(
     jnp.concatenate(
         [

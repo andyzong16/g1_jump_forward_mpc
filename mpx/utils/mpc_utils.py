@@ -418,6 +418,7 @@ def reference_humanoid_jump_forward(
     crouch_right=(7, 8, 9),
     crouch_right_vals=(-0.8, 1.5, -0.8),
 ):
+
     n_crouch = max(2, int(0.20 / dt))
     n_flight = max(2, int(0.28 / dt))
     n_land = max(2, int(0.18 / dt))

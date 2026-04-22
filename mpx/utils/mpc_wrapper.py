@@ -312,7 +312,7 @@ class MPCWrapper:
             self.config.dt,
             self.config.n_joints,
             self.config.n_contact,
-            self.config.p_legs0,
+            foot_op,
             self.config.q0,
         )
 
