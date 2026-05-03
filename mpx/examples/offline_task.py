@@ -8,6 +8,8 @@ from types import SimpleNamespace
 dir_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.abspath(os.path.join(dir_path, "..")))
 os.environ.setdefault("XLA_FLAGS", "--xla_gpu_enable_command_buffer=")
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+os.environ.setdefault("XLA_PYTHON_CLIENT_ALLOCATOR", "platform")
 
 import jax
 import jax.numpy as jnp
@@ -52,6 +54,7 @@ TASKS = {
     },
     "g1_jump_forward": {
         "config": "mpx.config.config_g1_jump_forward",
+        # scene.xml includes g1.xml plus skybox / checker floor (bare g1.xml has no backdrop).
         "scene_path": os.path.abspath(
             os.path.join(dir_path, "..", "data", "unitree_g1", "scene.xml")
         ),
@@ -60,6 +63,103 @@ TASKS = {
 }
 
 SOLVERS = ("primal_dual", "fddp")
+
+ISAAC_G1_BODY_NAMES = (
+    "pelvis",
+    "left_hip_pitch_link",
+    "right_hip_pitch_link",
+    "waist_yaw_link",
+    "left_hip_roll_link",
+    "right_hip_roll_link",
+    "waist_roll_link",
+    "left_hip_yaw_link",
+    "right_hip_yaw_link",
+    "torso_link",
+    "left_knee_link",
+    "right_knee_link",
+    "left_shoulder_pitch_link",
+    "right_shoulder_pitch_link",
+    "left_ankle_pitch_link",
+    "right_ankle_pitch_link",
+    "left_shoulder_roll_link",
+    "right_shoulder_roll_link",
+    "left_ankle_roll_link",
+    "right_ankle_roll_link",
+    "left_shoulder_yaw_link",
+    "right_shoulder_yaw_link",
+    "left_elbow_link",
+    "right_elbow_link",
+    "left_wrist_roll_link",
+    "right_wrist_roll_link",
+    "left_wrist_pitch_link",
+    "right_wrist_pitch_link",
+    "left_wrist_yaw_link",
+    "right_wrist_yaw_link",
+)
+
+ISAAC_G1_JOINT_NAMES = (
+    "left_hip_pitch_joint",
+    "right_hip_pitch_joint",
+    "waist_yaw_joint",
+    "left_hip_roll_joint",
+    "right_hip_roll_joint",
+    "waist_roll_joint",
+    "left_hip_yaw_joint",
+    "right_hip_yaw_joint",
+    "waist_pitch_joint",
+    "left_knee_joint",
+    "right_knee_joint",
+    "left_shoulder_pitch_joint",
+    "right_shoulder_pitch_joint",
+    "left_ankle_pitch_joint",
+    "right_ankle_pitch_joint",
+    "left_shoulder_roll_joint",
+    "right_shoulder_roll_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_roll_joint",
+    "left_shoulder_yaw_joint",
+    "right_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "right_elbow_joint",
+    "left_wrist_roll_joint",
+    "right_wrist_roll_joint",
+    "left_wrist_pitch_joint",
+    "right_wrist_pitch_joint",
+    "left_wrist_yaw_joint",
+    "right_wrist_yaw_joint",
+)
+
+MPX_G1_JOINT_NAMES = (
+    "left_hip_pitch_joint",
+    "left_hip_roll_joint",
+    "left_hip_yaw_joint",
+    "left_knee_joint",
+    "left_ankle_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_hip_pitch_joint",
+    "right_hip_roll_joint",
+    "right_hip_yaw_joint",
+    "right_knee_joint",
+    "right_ankle_pitch_joint",
+    "right_ankle_roll_joint",
+    "waist_yaw_joint",
+    "waist_roll_joint",
+    "waist_pitch_joint",
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "left_wrist_roll_joint",
+    "left_wrist_pitch_joint",
+    "left_wrist_yaw_joint",
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint",
+    "right_elbow_joint",
+    "right_wrist_roll_joint",
+    "right_wrist_pitch_joint",
+    "right_wrist_yaw_joint",
+)
 
 
 def _clone_config(module_name, solver_mode):
@@ -192,6 +292,33 @@ def _predicted_base_positions(config, model, qpos_sequence):
     return base_positions
 
 
+def _body_export_layout(task_name, model):
+    if task_name == "g1_jump_forward":
+        body_names = ISAAC_G1_BODY_NAMES
+    else:
+        body_names = tuple(
+            mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+            for body_id in range(1, model.nbody)
+        )
+
+    body_count = len(body_names)
+    body_index_by_name = {name: idx for idx, name in enumerate(body_names) if name}
+    mujoco_to_export = []
+    for body_id in range(1, model.nbody):
+        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+        export_idx = body_index_by_name.get(name)
+        if export_idx is not None:
+            mujoco_to_export.append((body_id, export_idx))
+    return body_names, body_count, mujoco_to_export
+
+
+def _reorder_named_columns(values, source_names, target_names):
+    values = np.asarray(values)
+    index_by_name = {name: idx for idx, name in enumerate(source_names)}
+    indices = [index_by_name[name] for name in target_names]
+    return values[:, indices]
+
+
 def _play_mujoco_trajectory(result, headless=False, loop=True, ghost_stride=1):
     config = result["config"]
     scene_path = result["scene_path"]
@@ -259,7 +386,90 @@ def _play_mujoco_trajectory(result, headless=False, loop=True, ghost_stride=1):
             time.sleep(config.dt)
 
 
-def run_task(task_name, solver_mode=None, headless=False, max_iter=100, verbose=True, loop=True):
+def _export_trajectory(result, export_path):
+    """Save the solved trajectory and metadata to a .npz file."""
+
+    config = result["config"]
+    X = np.asarray(result["X"])
+
+    qpos_list, qvel_list = [], []
+    for state in X:
+        qpos, qvel = _state_to_mujoco(config, state)
+        qpos_list.append(qpos)
+        qvel_list.append(qvel)
+    qpos_seq = np.asarray(qpos_list)
+    qvel_seq = np.asarray(qvel_list)
+
+    joint_pos = np.asarray(qpos_seq[:, 7:], dtype=np.float32)
+    joint_vel = np.asarray(qvel_seq[:, 6:], dtype=np.float32)
+    joint_names = None
+    if result["task_name"] == "g1_jump_forward":
+        if joint_pos.shape[1] != len(MPX_G1_JOINT_NAMES):
+            raise ValueError(
+                f"Expected {len(MPX_G1_JOINT_NAMES)} G1 joints, got {joint_pos.shape[1]}."
+            )
+        joint_pos = _reorder_named_columns(
+            joint_pos, MPX_G1_JOINT_NAMES, ISAAC_G1_JOINT_NAMES
+        ).astype(np.float32)
+        joint_vel = _reorder_named_columns(
+            joint_vel, MPX_G1_JOINT_NAMES, ISAAC_G1_JOINT_NAMES
+        ).astype(np.float32)
+        joint_names = np.asarray(ISAAC_G1_JOINT_NAMES)
+
+    dt = float(config.dt)
+    t = np.arange(X.shape[0], dtype=np.float64) * dt
+    fps = int(round(1.0 / dt)) if dt > 0.0 else 0
+
+    model = mujoco.MjModel.from_xml_path(result["scene_path"])
+    kin_data = mujoco.MjData(model)
+    body_names, body_count, mujoco_to_export = _body_export_layout(result["task_name"], model)
+    body_pos_w = np.zeros((qpos_seq.shape[0], body_count, 3), dtype=np.float32)
+    body_quat_w = np.zeros((qpos_seq.shape[0], body_count, 4), dtype=np.float32)
+    body_quat_w[:, :, 0] = 1.0
+    body_lin_vel_w = np.zeros((qpos_seq.shape[0], body_count, 3), dtype=np.float32)
+    body_ang_vel_w = np.zeros((qpos_seq.shape[0], body_count, 3), dtype=np.float32)
+    for i in range(qpos_seq.shape[0]):
+        kin_data.qpos = qpos_seq[i]
+        kin_data.qvel = qvel_seq[i]
+        mujoco.mj_forward(model, kin_data)
+        cvel = np.asarray(kin_data.cvel, dtype=np.float32)
+        for body_id, export_idx in mujoco_to_export:
+            body_pos_w[i, export_idx] = np.asarray(kin_data.xpos[body_id], dtype=np.float32)
+            body_quat_w[i, export_idx] = np.asarray(kin_data.xquat[body_id], dtype=np.float32)
+            body_ang_vel_w[i, export_idx] = cvel[body_id, :3]
+            body_lin_vel_w[i, export_idx] = cvel[body_id, 3:]
+
+    export_path = os.path.abspath(export_path)
+    os.makedirs(os.path.dirname(export_path) or ".", exist_ok=True)
+
+    payload = {
+        "dt": np.array(dt),
+        "fps": np.array(fps),
+        "t": t,
+        "joint_pos": joint_pos,
+        "joint_vel": joint_vel,
+        "body_pos_w": body_pos_w,
+        "body_quat_w": body_quat_w,
+        "body_lin_vel_w": body_lin_vel_w,
+        "body_ang_vel_w": body_ang_vel_w,
+        "body_names": np.asarray(body_names),
+    }
+    if joint_names is not None:
+        payload["joint_names"] = joint_names
+
+    np.savez(export_path, **payload)
+    print(f"Saved trajectory to {export_path}")
+
+
+def run_task(
+    task_name,
+    solver_mode=None,
+    headless=False,
+    max_iter=100,
+    verbose=True,
+    loop=True,
+    export=None,
+):
     result = solve_task(
         task_name,
         solver_mode=solver_mode,
@@ -272,6 +482,8 @@ def run_task(task_name, solver_mode=None, headless=False, max_iter=100, verbose=
         f"iterations {stats['n_iterations']} | "
         f"avg iter time {stats['average_iteration_time_ms']:.3f} ms"
     )
+    if export is not None:
+        _export_trajectory(result, export)
     _play_mujoco_trajectory(result, headless=headless, loop=loop)
 
 
@@ -291,6 +503,12 @@ def build_parser(default_task=None):
     parser.add_argument("--max-iter", type=int, default=100)
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--no-loop", action="store_true")
+    parser.add_argument(
+        "--export",
+        metavar="PATH",
+        default=None,
+        help="Save the solved trajectory to the given .npz file.",
+    )
     return parser
 
 
@@ -306,6 +524,7 @@ def main(default_task=None):
         max_iter=args.max_iter,
         verbose=not args.quiet,
         loop=not args.no_loop,
+        export=args.export,
     )
 
 

@@ -323,6 +323,7 @@ class MPCWrapper:
         X0 = self.initial_X0.at[:, : 13 + self.config.n_joints].set(
             reference[:, : 13 + self.config.n_joints]
         )
+        
         U0 = self.initial_U0
         V0 = self.initial_V0
 

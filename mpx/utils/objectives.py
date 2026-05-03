@@ -223,20 +223,7 @@ def h1_wb_obj(n_joints,n_contact,N,W,reference,x, u, t):
 
     mu = 0.7
     friction_cone = mu*grf[2::3] - jnp.sqrt(jnp.square(grf[1::3]) + jnp.square(grf[::3]) + jnp.ones(n_contact)*1e-1)
-    # joints_limits = jnp.array([
-    # 0.43, 0.43, 0.43, 0.43,  1.57, 1.57,  2.05,  0.26, 0.52, 0.87,
-    # 0.43, 0.43, 0.43, 0.43,  1.57, 1.57,  2.05,  0.26, 0.52, 0.87,
-    # 2.35, 2.35, 
-    # 2.87,  2.87,  3.11,  0.34,  4.45,  1.3,  2.61,1.25, 
-    # 2.87,  2.87,  3.11,  0.34,  4.45,  1.3,  2.61,1.25])
-    # joints_limits = jnp.kron(jnp.eye(n_joints),(jnp.array([-1,1]))).T@q+joints_limits + jnp.ones_like(joints_limits)*1e-2
-    # torque_limits = jnp.array([
-    #     200, 200, 200, 200, 200, 200, 300, 300, 40, 40,
-    #     200, 200, 200, 200, 200, 200, 300, 300, 40, 40,
-    #     200, 200,
-    #     40, 40, 40, 40, 18, 18, 18, 18,
-    #     40, 40, 40, 40, 18, 18, 18, 18])
-    # torque_limits = jnp.kron(jnp.eye(n_joints),(jnp.array([-1,1]))).T@tau+torque_limits + jnp.ones_like(torque_limits)*1e-2
+
     contact = reference[t,13+n_joints+3*n_contact:13+n_joints+4*n_contact]
 
     stage_cost = (p - p_ref).T @ W[:3,:3] @ (p - p_ref) + math.quat_sub(quat,quat_ref).T@W[3:6,3:6]@math.quat_sub(quat,quat_ref) + (q - q_ref).T @ W[6:6+n_joints,6:6+n_joints] @ (q - q_ref) +\
@@ -534,6 +521,7 @@ def g1_kinodynamic_obj(n_joints, n_contact, N, W, reference, x, u, t):
         jnp.square(grf[1::3]) + jnp.square(grf[::3]) + jnp.ones(n_contact) * 1e-1
     )
 
+
     stage_cost = (
         (p - p_ref).T @ W[:3,:3] @ (p - p_ref)
         + math.quat_sub(quat,quat_ref).T @ W[3:6,3:6] @ math.quat_sub(quat,quat_ref)
@@ -562,3 +550,33 @@ def g1_kinodynamic_obj(n_joints, n_contact, N, W, reference, x, u, t):
     )
 
     return jnp.where(t == N, 0.5 * term_cost, 0.5 * stage_cost)
+
+def g1_jump_forward_obj(n_joints, n_contact, N, W, reference, x, u, t):
+    """Jump-forward objective with upper-body back-bend suppression."""
+    base_cost = g1_kinodynamic_obj(n_joints, n_contact, N, W, reference, x, u, t)
+
+    q = x[7:7 + n_joints]
+    dq = x[13 + n_joints : 13 + 2 * n_joints]
+
+    q_ref = reference[t, 7:7 + n_joints]
+    contact = reference[t, 13 + n_joints + 3 * n_contact : 13 + n_joints + 4 * n_contact]
+
+    # G1 waist order is yaw, roll, pitch at joint indices 12, 13, 14.
+    waist = q[12:15]
+    waist_ref = q_ref[12:15]
+    waist_rate = dq[12:15]
+
+    # Positive waist pitch leans the torso forward in this model; penalize only
+    # backward bending beyond a small tolerance so the jump can still crouch.
+    waist_pitch = q[14]
+    back_bend = jnp.maximum(-0.02 - waist_pitch, 0.0)
+    anti_back_bend_penalty = 4.0e5 * jnp.square(back_bend)
+
+    late_phase = jnp.where(t >= int(0.35 * N), 1.0, 0.0)
+    stance_gate = jnp.mean(contact)
+    upper_body_tracking = 7.5e3 * late_phase * jnp.sum(jnp.square(waist - waist_ref))
+    upper_body_rate_damping = 1.2e3 * stance_gate * jnp.sum(jnp.square(waist_rate))
+
+    return base_cost + 0.5 * (
+        anti_back_bend_penalty + upper_body_tracking + upper_body_rate_damping
+    )

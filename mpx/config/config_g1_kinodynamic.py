@@ -28,13 +28,23 @@ step_height = 0.08
 initial_height = 0.755
 robot_height = 0.755
 
-p0 = jnp.array([0.0, 0.0, 0.755])
+p0 = jnp.array([0.0, 0.0, 0.76])
 quat0 = jnp.array([1.0, 0.0, 0.0, 0.0])
-q0 = jnp.zeros(23)
+n_joints = 29
+# 29-DoF nominal standing pose (legs/waist/arms), in actuator order.
+q0 = jnp.array(
+    [
+        -0.20, 0.00, 0.00, 0.42, -0.23, 0.00,   # left leg
+        -0.20, 0.00, 0.00, 0.42, -0.23, 0.00,   # right leg
+        0.00, 0.00, 0.00,                        # waist yaw/roll/pitch
+        0.35, 0.18, 0.00, 0.87, 0.00, 0.00, 0.00,  # left arm
+        0.35, -0.18, 0.00, 0.87, 0.00, 0.00, 0.00, # right arm
+    ],
+    dtype=jnp.float64,
+)
 
 p_legs0 = jnp.zeros(6)
 
-n_joints = 23
 n_contact = len(contact_frame)
 n = 13 + 2 * n_joints + 3 * n_contact
 m = n_joints + 3 * n_contact
@@ -43,20 +53,42 @@ u_ref = jnp.zeros(m)
 
 Qp = jnp.diag(jnp.array([0.0, 0.0, 1e4]))
 Qrot = jnp.diag(jnp.array([1.0, 1.0, 0.0])) * 1.0e3
-Qq = jnp.diag(
-    jnp.concatenate(
-        [
-            jnp.ones(12) * 4e0,
-            jnp.ones(1) * 4e1,
-            jnp.ones(10) * 4e1,
-        ]
-    )
+q_tracking_weights = jnp.array(
+    [
+        8e1, 8e1, 8e1, 1e2, 8e1, 8e1,  # left leg
+        8e1, 8e1, 8e1, 1e2, 8e1, 8e1,  # right leg
+        4e1, 4e1, 4e1,                 # waist
+        2e1, 2e1, 2e1, 2e1, 1e1, 1e1, 1e1,  # left arm
+        2e1, 2e1, 2e1, 2e1, 1e1, 1e1, 1e1,  # right arm
+    ],
+    dtype=jnp.float64,
 )
+Qq = jnp.diag(q_tracking_weights)
 Qdp = jnp.diag(jnp.array([1.0, 1.0, 1.0])) * 1e3
-Qomega = jnp.diag(jnp.array([1.0, 1.0, 1.0])) * 1e2
-Qdq = jnp.diag(jnp.ones(n_joints)) * 1e0
+Qomega = jnp.diag(jnp.array([1.0, 1.0, 1.0])) * 4e2
+qd_tracking_weights = jnp.array(
+    [
+        2.0, 2.0, 2.0, 3.0, 2.0, 2.0,  # left leg
+        2.0, 2.0, 2.0, 3.0, 2.0, 2.0,  # right leg
+        30.0, 30.0, 30.0,              # waist
+        20.0, 20.0, 20.0, 20.0, 15.0, 15.0, 15.0,  # left arm
+        20.0, 20.0, 20.0, 20.0, 15.0, 15.0, 15.0,  # right arm
+    ],
+    dtype=jnp.float64,
+)
+Qdq = jnp.diag(qd_tracking_weights)
 Qleg = jnp.diag(jnp.tile(jnp.array([1e5, 1e5, 1e5]), n_contact))
-Qdq_cmd = jnp.diag(jnp.ones(n_joints)) * 1e-2
+dq_cmd_weights = jnp.array(
+    [
+        0.02, 0.02, 0.02, 0.03, 0.02, 0.02,  # left leg
+        0.02, 0.02, 0.02, 0.03, 0.02, 0.02,  # right leg
+        5.0, 5.0, 5.0,                        # waist
+        2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0,    # left arm
+        2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0,    # right arm
+    ],
+    dtype=jnp.float64,
+)
+Qdq_cmd = jnp.diag(dq_cmd_weights)
 Qgrf = jnp.diag(jnp.ones(3 * n_contact)) * 1e-3
 W = jax.scipy.linalg.block_diag(Qp, Qrot, Qq, Qdp, Qomega, Qdq, Qleg, Qdq_cmd, Qgrf)
 
@@ -65,22 +97,22 @@ initial_state = jnp.concatenate([p0, quat0, q0, jnp.zeros(6 + n_joints), p_legs0
 
 joint_kp = jnp.array(
     [200.0, 200.0, 200.0, 200.0, 200.0, 60.0] * 2
-    + [120.0]
-    + [45.0, 45.0, 45.0, 45.0, 45.0]
-    + [45.0, 45.0, 45.0, 45.0, 45.0]
+    + [120.0, 120.0, 120.0]
+    + [100.0, 100.0, 50.0, 50.0, 40.0, 40.0, 40.0]
+    + [100.0, 100.0, 50.0, 50.0, 40.0, 40.0, 40.0]
 )
 joint_kd = jnp.array(
     [5.0, 5.0, 5.0, 5.0, 5.0, 1.5] * 2
-    + [3.0]
-    + [1.5, 1.5, 1.5, 1.5, 1.5]
-    + [1.5, 1.5, 1.5, 1.5, 1.5]
+    + [3.0, 3.0, 3.0]
+    + [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+    + [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
 )
 
 torque_limits = jnp.array(
-    [88.0, 88.0, 88.0, 139.0, 40.0, 40.0] * 2
-    + [88.0]
-    + [20.0, 20.0, 20.0, 20.0, 20.0]
-    + [20.0, 20.0, 20.0, 20.0, 20.0]
+    [88.0, 139.0, 88.0, 139.0, 35.0, 35.0] * 2
+    + [88.0, 35.0, 35.0]
+    + [25.0, 25.0, 25.0, 25.0, 25.0, 5.0, 5.0]
+    + [25.0, 25.0, 25.0, 25.0, 25.0, 5.0, 5.0]
 )
 
 cost = partial(mpc_objectives.g1_kinodynamic_obj, n_joints, n_contact, N)

@@ -418,10 +418,29 @@ def reference_humanoid_jump_forward(
     crouch_right=(7, 8, 9),
     crouch_right_vals=(-0.8, 1.5, -0.8),
 ):
+    # Ensure phase allocation always matches the requested horizon exactly.
+    N = int(N)
+    if N <= 0:
+        raise ValueError("N must be positive")
 
-    n_crouch = max(2, int(0.20 / dt))
-    n_flight = max(2, int(0.28 / dt))
-    n_land = max(2, int(0.18 / dt))
+    min_phase = 2 if N >= 6 else 1
+    n_crouch = max(min_phase, int(0.20 / dt))
+    n_flight = max(min_phase, int(0.28 / dt))
+    n_land = max(min_phase, int(0.18 / dt))
+
+    total = n_crouch + n_flight + n_land
+    if total > N:
+        overflow = total - N
+        # Trim longer phases first, while respecting minimum phase length.
+        while overflow > 0 and n_flight > min_phase:
+            n_flight -= 1
+            overflow -= 1
+        while overflow > 0 and n_land > min_phase:
+            n_land -= 1
+            overflow -= 1
+        while overflow > 0 and n_crouch > min_phase:
+            n_crouch -= 1
+            overflow -= 1
     n_settle = max(0, N - (n_crouch + n_flight + n_land))
 
     x_crouch = jnp.linspace(0.0, 0.05, n_crouch)
@@ -455,8 +474,9 @@ def reference_humanoid_jump_forward(
     q_ref = jnp.concatenate([q_crouch, q_flight, q_land, q_settle], axis=0)
 
     dp_ref = jnp.zeros((N, 3))
-    dp_ref = dp_ref.at[:-1].set((p_ref[1:] - p_ref[:-1]) / dt)
-    dp_ref = dp_ref.at[-1].set(dp_ref[-2])
+    if N > 1:
+        dp_ref = dp_ref.at[:-1].set((p_ref[1:] - p_ref[:-1]) / dt)
+        dp_ref = dp_ref.at[-1].set(dp_ref[-2])
 
     foot_ref = jnp.tile(foot0, (N, 1))
     flight_shift = foot_shift * phase
