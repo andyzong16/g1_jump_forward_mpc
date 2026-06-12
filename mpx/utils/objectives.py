@@ -557,8 +557,12 @@ def g1_jump_forward_obj(n_joints, n_contact, N, W, reference, x, u, t):
 
     q = x[7:7 + n_joints]
     dq = x[13 + n_joints : 13 + 2 * n_joints]
+    # not sure what this does
+    p_leg = x[13 + 2 * n_joints : 13 + 2 * n_joints + 3 * n_contact]
 
     q_ref = reference[t, 7:7 + n_joints]
+    # keep for now
+    p_leg_ref = reference[t, 13 + n_joints : 13 + n_joints + 3 * n_contact]
     contact = reference[t, 13 + n_joints + 3 * n_contact : 13 + n_joints + 4 * n_contact]
 
     # G1 waist order is yaw, roll, pitch at joint indices 12, 13, 14.
@@ -577,6 +581,15 @@ def g1_jump_forward_obj(n_joints, n_contact, N, W, reference, x, u, t):
     upper_body_tracking = 7.5e3 * late_phase * jnp.sum(jnp.square(waist - waist_ref))
     upper_body_rate_damping = 1.2e3 * stance_gate * jnp.sum(jnp.square(waist_rate))
 
+    # newly added
+    lateral_gap = p_leg[1] - p_leg[4]
+    lateral_gap_ref = p_leg_ref[1] - p_leg_ref[4]
+    signed_gap = jnp.sign(lateral_gap_ref) * lateral_gap
+    min_lateral_gap = 0.05
+    crossing_violation = jnp.maximum(min_lateral_gap - signed_gap, 0.0)
+    anti_cross_penalty = 2.0e5 * jnp.square(crossing_violation)
+
     return base_cost + 0.5 * (
         anti_back_bend_penalty + upper_body_tracking + upper_body_rate_damping
+        + anti_cross_penalty
     )

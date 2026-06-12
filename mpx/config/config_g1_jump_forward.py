@@ -39,6 +39,14 @@ W= base.W
 W = W.at[3, 3].set(3.0e3)   # base orientation
 W = W.at[4, 4].set(5.0e3)   # pitch orientation
 
+W = W.at[5, 5].set(1.0e4)    # base yaw orientation
+W = W.at[40, 40].set(5.0e3)  # base yaw rate
+
+for idx in (7, 8, 13, 14):    # hip roll / hip yaw, both legs
+    W = W.at[idx, idx].set(6.0e2)
+for idx in (42, 43, 48, 49):  # hip roll / hip yaw rates, both legs
+    W = W.at[idx, idx].set(3.0e2)
+
 for idx in (18, 19, 20):    # waist joints in q block
     W = W.at[idx, idx].set(3.0e2)
 W = W.at[20, 20].set(7.5e2)  # waist pitch: discourage leaning back
@@ -70,9 +78,9 @@ reference = partial(
     mpc_utils.reference_humanoid_jump_forward,
     base_height=robot_height,
     crouch_height=0.68,
-    apex_height=0.82,
-    jump_distance=0.95,
-    foot_shift=0.50,
+    apex_height=1.00,
+    jump_distance=1.20,
+    foot_shift=0.68,
     foot_lift=0.05,
     crouch_left=(0, 1, 2, 3, 4, 5, 15, 16, 17, 18),
     crouch_left_vals=_crouch_leg_l + _crouch_arm_l,

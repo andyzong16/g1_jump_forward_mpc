@@ -425,7 +425,10 @@ def reference_humanoid_jump_forward(
 
     min_phase = 2 if N >= 6 else 1
     n_crouch = max(min_phase, int(0.20 / dt))
-    n_flight = max(min_phase, int(0.28 / dt))
+    g = 9.81
+    height_gain = max(apex_height - base_height, 0.0)
+    flight_duration = (8.0 * height_gain / g) ** 0.5 if height_gain > 0.0 else 0.28
+    n_flight = max(min_phase, int(round(flight_duration / dt)))
     n_land = max(min_phase, int(0.18 / dt))
 
     total = n_crouch + n_flight + n_land
